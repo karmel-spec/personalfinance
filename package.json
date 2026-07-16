@@ -1,0 +1,9 @@
+{
+  "name": "personalfinance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Larson family personal finance hub — financial statement, spending register, reports, envelopes, kid ledger",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}

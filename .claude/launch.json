@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "personalfinance",
+      "cwd": "/Users/hildegard/Desktop/personalfinance",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5177", "--directory", "/Users/hildegard/Desktop/personalfinance"],
+      "port": 5177
+    }
+  ]
+}
