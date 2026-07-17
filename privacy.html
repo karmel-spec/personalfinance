@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Larson Family Finance</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌲</text></svg>">
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #1e2430; background: #f6f7f9; margin: 0; }
+    main { max-width: 720px; margin: 0 auto; padding: 48px 24px 80px; }
+    h1 { font-size: 1.6rem; } h2 { font-size: 1.1rem; margin-top: 28px; }
+    p, li { line-height: 1.55; }
+    .meta { color: #5a6475; font-size: .9rem; }
+    a { color: #175e54; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>🌲 Larson Family Finance — Privacy Policy</h1>
+  <p class="meta">Effective July 16, 2026 · Operated by the Larson household (developer of record: Brigham Larson Pianos, Orem, Utah)</p>
+
+  <p>Larson Family Finance is a private, household-only financial application. It is not offered to
+  the public; its only users are members of one family. This policy describes how the application
+  handles their data.</p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><b>Financial statement data</b> that household members enter directly (asset and liability line items, income figures, budgeting envelopes, family ledger entries).</li>
+    <li><b>Bank account and transaction data</b> retrieved through <a href="https://plaid.com/legal/#end-user-privacy-policy">Plaid</a>, only for accounts a household member chooses to connect, and only after that member authenticates directly with their bank and consents inside Plaid Link.</li>
+    <li>We do <b>not</b> collect or store Social Security numbers, dates of birth, or bank login credentials. Bank credentials are entered only in Plaid's own interface and are never visible to this application.</li>
+  </ul>
+
+  <h2>How data is used</h2>
+  <p>Solely for the household's own budgeting, spending reports, and preparation of the family's
+  personal financial statement. Data is never sold, rented, shared with advertisers, or disclosed to
+  any third party other than the service providers that operate the application (Netlify for hosting
+  and storage; Plaid for bank connectivity).</p>
+
+  <h2>How data is protected</h2>
+  <ul>
+    <li>All traffic is encrypted in transit with TLS 1.2 or better (HTTPS).</li>
+    <li>Data is stored in Netlify Blobs, which encrypts data at rest and in transit.</li>
+    <li>Access requires authentication; only authorized household members can sign in.</li>
+    <li>Plaid access tokens and application secrets are held in server-side environment variables, never in client code or the code repository.</li>
+  </ul>
+
+  <h2>Consent</h2>
+  <p>Each bank connection is initiated by the account owner personally, who authenticates with their
+  bank and grants consent through Plaid Link at the moment of connection. Connections can be revoked
+  at any time at <a href="https://my.plaid.com">my.plaid.com</a> or by contacting us.</p>
+
+  <h2>Retention and deletion</h2>
+  <p>Data is retained while the household actively uses the application. Any household member may
+  request correction or deletion of their data at any time by emailing the contact below; deletion
+  requests are honored within 30 days, including removal of stored transactions and revocation of the
+  related Plaid access tokens. This policy is reviewed at least annually.</p>
+
+  <h2>Contact</h2>
+  <p>Karmel Larson, Owner — <a href="mailto:karmel@brighamlarsonpianos.com">karmel@brighamlarsonpianos.com</a></p>
+</main>
+</body>
+</html>
