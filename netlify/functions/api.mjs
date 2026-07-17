@@ -56,9 +56,14 @@ function authContext(req) {
   if (hermesKey && token === hermesKey) return { kind: "agent", email: "hermes-agent" };
   const session = verifySession(token);
   if (session) return { kind: "user", email: session.email };
-  // If Google login is not configured yet, run open (setup mode).
-  if (!ENV("GOOGLE_CLIENT_ID")) return { kind: "open", email: "setup-mode" };
+  // If no auth is configured yet at all, run open (setup mode).
+  if (!ENV("GOOGLE_CLIENT_ID") && !ENV("APP_PASSWORD")) return { kind: "open", email: "setup-mode" };
   return null;
+}
+
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 
 async function verifyGoogleIdToken(credential) {
@@ -81,10 +86,21 @@ export default async (req) => {
 
   // ---- public routes ----
   if (route === "config") {
+    const mode = ENV("GOOGLE_CLIENT_ID") ? "google" : ENV("APP_PASSWORD") ? "password" : "open";
     return json({
       googleClientId: ENV("GOOGLE_CLIENT_ID") || null,
-      authRequired: Boolean(ENV("GOOGLE_CLIENT_ID")),
+      authMode: mode,
+      authRequired: mode !== "open",
     });
+  }
+
+  if (route === "auth/password" && req.method === "POST") {
+    const { password } = await req.json().catch(() => ({}));
+    const expected = ENV("APP_PASSWORD");
+    if (!expected) return json({ error: "Password login is not enabled." }, 400);
+    if (!password || !safeEqual(password, expected))
+      return json({ error: "Wrong password." }, 401);
+    return json({ token: signSession("family"), email: "family", name: "Larson family" });
   }
 
   if (route === "auth/google" && req.method === "POST") {
@@ -139,35 +155,137 @@ export default async (req) => {
   if (route === "tx/import" && req.method === "POST") {
     const { transactions } = await req.json().catch(() => ({}));
     if (!Array.isArray(transactions)) return json({ error: "transactions array required" }, 400);
-    const byYear = {};
-    for (const t of transactions) {
-      if (!t || !t.date || typeof t.amount !== "number") continue;
-      const y = String(t.date).slice(0, 4);
-      if (!/^\d{4}$/.test(y)) continue;
-      (byYear[y] ||= []).push(t);
-    }
-    let added = 0, skipped = 0;
-    for (const [y, list] of Object.entries(byYear)) {
-      const key = `tx-${y}`;
-      const existing = (await store().get(key, { type: "json" })) || [];
-      const seen = new Set(existing.map((t) => t.id));
-      for (const t of list) {
-        if (!t.id) t.id = crypto.createHash("sha1")
-          .update(`${t.date}|${t.amount}|${t.desc}|${t.account}`).digest("hex").slice(0, 16);
-        if (seen.has(t.id)) { skipped++; continue; }
-        seen.add(t.id);
-        existing.push(t);
-        added++;
-      }
-      existing.sort((a, b) => (a.date < b.date ? 1 : -1));
-      await store().setJSON(key, existing);
-    }
+    const { added, skipped } = await importTransactions(transactions);
     await touchMeta(auth, `import:${added} tx`);
     return json({ ok: true, added, skipped });
   }
 
+  // ---- Plaid (auto-sync) — activates when PLAID_CLIENT_ID/PLAID_SECRET are set ----
+  if (route.startsWith("plaid/")) return plaidRoutes(route, req, auth);
+
   return json({ error: `No route: ${req.method} ${route}` }, 404);
 };
+
+const PLAID_HOST = () =>
+  ({ sandbox: "https://sandbox.plaid.com", development: "https://development.plaid.com", production: "https://production.plaid.com" }[
+    ENV("PLAID_ENV", "production")
+  ]);
+
+async function plaid(path, body) {
+  const res = await fetch(PLAID_HOST() + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_id: ENV("PLAID_CLIENT_ID"), secret: ENV("PLAID_SECRET"), ...body }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_message || data.error_code || `Plaid error ${res.status}`);
+  return data;
+}
+
+async function plaidRoutes(route, req, auth) {
+  const configured = Boolean(ENV("PLAID_CLIENT_ID") && ENV("PLAID_SECRET"));
+
+  if (route === "plaid/status") {
+    const items = (await store().get("plaid-items", { type: "json" })) || [];
+    return json({
+      configured,
+      env: ENV("PLAID_ENV", "production"),
+      items: items.map((i) => ({ institution: i.institution, addedAt: i.addedAt, lastSync: i.lastSync, accounts: i.accounts })),
+    });
+  }
+  if (!configured) return json({ error: "Plaid is not configured yet — set PLAID_CLIENT_ID and PLAID_SECRET in Netlify." }, 400);
+
+  if (route === "plaid/link-token" && req.method === "POST") {
+    const r = await plaid("/link/token/create", {
+      user: { client_user_id: "larson-family" },
+      client_name: "Larson Family Finance",
+      products: ["transactions"],
+      transactions: { days_requested: 730 },
+      country_codes: ["US"],
+      language: "en",
+    }).catch((e) => ({ error: e.message }));
+    return r.error ? json(r, 502) : json({ link_token: r.link_token });
+  }
+
+  if (route === "plaid/exchange" && req.method === "POST") {
+    const { public_token, institution } = await req.json().catch(() => ({}));
+    if (!public_token) return json({ error: "public_token required" }, 400);
+    try {
+      const r = await plaid("/item/public_token/exchange", { public_token });
+      const items = (await store().get("plaid-items", { type: "json" })) || [];
+      items.push({ accessToken: r.access_token, itemId: r.item_id, institution: institution || "bank", addedAt: new Date().toISOString(), cursor: null });
+      await store().setJSON("plaid-items", items);
+      await touchMeta(auth, `plaid:linked ${institution || "bank"}`);
+      return json({ ok: true });
+    } catch (e) { return json({ error: e.message }, 502); }
+  }
+
+  if (route === "plaid/sync" && req.method === "POST") {
+    const items = (await store().get("plaid-items", { type: "json" })) || [];
+    if (!items.length) return json({ error: "No banks linked yet." }, 400);
+    let totalAdded = 0;
+    const results = [];
+    for (const item of items) {
+      try {
+        let cursor = item.cursor, hasMore = true, txs = [], accounts = {};
+        while (hasMore) {
+          const r = await plaid("/transactions/sync", { access_token: item.accessToken, cursor: cursor || undefined, count: 500 });
+          (r.accounts || []).forEach((a) => (accounts[a.account_id] = a.name));
+          txs.push(...r.added);
+          cursor = r.next_cursor;
+          hasMore = r.has_more;
+        }
+        // Plaid: positive amount = money out. App: negative = spend.
+        const mapped = txs.map((t) => ({
+          date: t.date,
+          desc: t.merchant_name || t.name || "",
+          amount: -t.amount,
+          account: `${item.institution} — ${accounts[t.account_id] || "account"}`,
+          source: "plaid",
+          category: t.personal_finance_category?.primary
+            ? t.personal_finance_category.primary.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+            : "Uncategorized",
+        }));
+        const imp = await importTransactions(mapped);
+        totalAdded += imp.added;
+        item.cursor = cursor;
+        item.lastSync = new Date().toISOString();
+        item.accounts = Object.values(accounts);
+        results.push({ institution: item.institution, added: imp.added, skipped: imp.skipped });
+      } catch (e) { results.push({ institution: item.institution, error: e.message }); }
+    }
+    await store().setJSON("plaid-items", items);
+    await touchMeta(auth, `plaid-sync:${totalAdded} tx`);
+    return json({ ok: true, results, totalAdded });
+  }
+
+  return json({ error: `No route: ${req.method} ${route}` }, 404);
+}
+
+async function importTransactions(transactions) {
+  const byYear = {};
+  for (const t of transactions) {
+    if (!t || !t.date || typeof t.amount !== "number") continue;
+    const y = String(t.date).slice(0, 4);
+    if (/^\d{4}$/.test(y)) (byYear[y] ||= []).push(t);
+  }
+  let added = 0, skipped = 0;
+  for (const [y, list] of Object.entries(byYear)) {
+    const key = `tx-${y}`;
+    const existing = (await store().get(key, { type: "json" })) || [];
+    const seen = new Set(existing.map((t) => t.id));
+    for (const t of list) {
+      if (!t.id) t.id = crypto.createHash("sha1").update(`${t.date}|${t.amount}|${t.desc}|${t.account}`).digest("hex").slice(0, 16);
+      if (seen.has(t.id)) { skipped++; continue; }
+      seen.add(t.id);
+      existing.push(t);
+      added++;
+    }
+    existing.sort((a, b) => (a.date < b.date ? 1 : -1));
+    await store().setJSON(key, existing);
+  }
+  return { added, skipped };
+}
 
 async function touchMeta(auth, action) {
   try {

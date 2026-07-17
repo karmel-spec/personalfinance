@@ -16,8 +16,12 @@
   <div id="signin-overlay">
     <div style="font-size:3rem">🌲</div>
     <h1>Larson Family Finance</h1>
-    <p>Private — sign in with an approved Google account.</p>
+    <p>Private — family only.</p>
     <div id="gsi-button"></div>
+    <form id="pw-form" style="display:none;gap:8px">
+      <input id="pw-input" type="password" placeholder="Family password" autocomplete="current-password">
+      <button class="btn primary" type="submit">Enter</button>
+    </form>
     <div id="signin-error"></div>
   </div>
 

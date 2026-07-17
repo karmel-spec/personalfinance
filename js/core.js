@@ -145,6 +145,21 @@ const PF = {
 
   showSignIn() {
     document.getElementById("signin-overlay").style.display = "flex";
+    if (PF.state.config.authMode === "password") {
+      document.getElementById("pw-form").style.display = "flex";
+      document.getElementById("pw-input").focus();
+      document.getElementById("pw-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          const r = await PF.api("auth/password", { method: "POST", body: JSON.stringify({ password: document.getElementById("pw-input").value }) });
+          PF.state.session = r;
+          localStorage.setItem("pf-session", JSON.stringify(r));
+          document.getElementById("signin-overlay").style.display = "none";
+          App.start();
+        } catch (err) { document.getElementById("signin-error").textContent = err.message; }
+      });
+      return;
+    }
     const gsi = document.createElement("script");
     gsi.src = "https://accounts.google.com/gsi/client";
     gsi.onload = () => {

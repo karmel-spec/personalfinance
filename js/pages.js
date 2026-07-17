@@ -545,8 +545,65 @@ Pages.accounts = function () {
       <td>${a.url ? `<a href="${PF.esc(a.url)}" target="_blank" rel="noopener">open ↗</a>` : ""}</td>
       <td><button class="mini danger" onclick="Pages.delAccount('${a.id}')">✕</button></td></tr>`).join("")}
     </tbody></table>
-    <p class="muted">Balances entered here flow into nothing automatically (yet) — they're your quick reference. Investor360 and Starlar are linked, not synced: click through to check them, then update the matching line on the Statement. True auto-sync for UCCU / Relay / Discover needs a Plaid connection — see the README for what that takes.</p>
+    <p class="muted">Balances entered here are your quick reference. Investor360 and Starlar are linked, not synced: click through, then update the matching line on the Statement.</p>
+  </div>
+  <div class="card" id="plaid-card">
+    <h3>Bank auto-sync <small class="muted">(Plaid)</small></h3>
+    <p id="plaid-status" class="muted">Checking sync status…</p>
+    <div id="plaid-actions" class="filters"></div>
   </div>`;
+};
+
+Pages.loadPlaidCard = async function () {
+  const status = $("#plaid-status"), actions = $("#plaid-actions");
+  if (!status) return;
+  if (!PF.state.online) { status.textContent = "Auto-sync runs on the deployed site (needs the backend)."; return; }
+  try {
+    const s = await PF.api("plaid/status");
+    if (!s.configured) {
+      status.innerHTML = "Not configured yet. Create a free account at <b>plaid.com</b> → get your <code>client_id</code> and <code>secret</code> → add <code>PLAID_CLIENT_ID</code> / <code>PLAID_SECRET</code> / <code>PLAID_ENV</code> in Netlify. Then this card turns into a Connect-a-bank button for UCCU, Relay, and Discover.";
+      return;
+    }
+    status.innerHTML = s.items.length
+      ? "Linked: " + s.items.map((i) => `<b>${PF.esc(i.institution)}</b>${i.lastSync ? ` (synced ${new Date(i.lastSync).toLocaleDateString()})` : ""}`).join(", ")
+      : "Plaid is configured — no banks linked yet.";
+    actions.innerHTML = `<button class="btn primary" id="plaid-connect">🔗 Connect a bank</button>
+      ${s.items.length ? '<button class="btn" id="plaid-sync">↻ Sync transactions now</button>' : ""}`;
+    $("#plaid-connect")?.addEventListener("click", Pages.plaidConnect);
+    $("#plaid-sync")?.addEventListener("click", async () => {
+      $("#plaid-sync").textContent = "Syncing…";
+      try {
+        const r = await PF.api("plaid/sync", { method: "POST", body: "{}" });
+        PF.toast(`Synced ${r.totalAdded} new transactions`);
+        const years = await PF.api("tx/years");
+        await PF.loadTx(years);
+        App.render();
+      } catch (e) { PF.toast(e.message, true); }
+    });
+  } catch (e) { status.textContent = "Sync status unavailable: " + e.message; }
+};
+
+Pages.plaidConnect = async function () {
+  try {
+    const { link_token } = await PF.api("plaid/link-token", { method: "POST", body: "{}" });
+    if (!window.Plaid) {
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+    Plaid.create({
+      token: link_token,
+      onSuccess: async (public_token, metadata) => {
+        await PF.api("plaid/exchange", { method: "POST", body: JSON.stringify({ public_token, institution: metadata?.institution?.name || "bank" }) });
+        PF.toast(`${metadata?.institution?.name || "Bank"} linked — syncing…`);
+        await PF.api("plaid/sync", { method: "POST", body: "{}" }).catch(() => {});
+        App.render();
+      },
+    }).open();
+  } catch (e) { PF.toast(e.message, true); }
 };
 
 Pages.addAccount = function () {
@@ -559,6 +616,7 @@ Pages.delAccount = function (id) {
   PF.save("accounts", PF.state.accounts).then(() => App.render());
 };
 Pages.wireAccounts = function () {
+  Pages.loadPlaidCard();
   $$(".acct-cell").forEach((inp) => inp.addEventListener("change", () => {
     const a = PF.state.accounts.find((x) => x.id === inp.dataset.id);
     if (!a) return;
@@ -585,9 +643,11 @@ Pages.settings = function () {
   </div>
   <div class="card">
     <h3>Access</h3>
-    <p>${PF.state.config?.authRequired
+    <p>${PF.state.config?.authMode === "google"
       ? `Google sign-in is <b>on</b>. Allowed emails are controlled by the <code>ALLOWED_EMAILS</code> environment variable in Netlify.`
-      : `⚠️ Google sign-in is <b>not configured yet</b> — the app is open. Add <code>GOOGLE_CLIENT_ID</code>, <code>ALLOWED_EMAILS</code>, and <code>SESSION_SECRET</code> in Netlify (steps in the README) to lock it down.`}</p>
+      : PF.state.config?.authMode === "password"
+      ? `🔒 The app is protected by the <b>family password</b> (the <code>APP_PASSWORD</code> variable in Netlify). Upgrade to Google sign-in anytime by adding <code>GOOGLE_CLIENT_ID</code> + <code>ALLOWED_EMAILS</code> — steps in the README.`
+      : `⚠️ No login is configured yet — the app is open. Add <code>APP_PASSWORD</code> (quick) or <code>GOOGLE_CLIENT_ID</code> + <code>ALLOWED_EMAILS</code> (best) in Netlify to lock it down.`}</p>
     ${PF.state.session ? `<p>Signed in as <b>${PF.esc(PF.state.session.email)}</b> <button class="mini" onclick="PF.signOut()">sign out</button></p>` : ""}
   </div>
   <div class="card">
